@@ -7,8 +7,10 @@ import java.util.Optional;
 import java.util.TreeSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.google.common.base.Suppliers;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import etcodehome.freeterraforged.world.worldgen.GeneratorContext;
@@ -18,6 +20,7 @@ import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.QuartPos;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.ChunkPos;
@@ -34,6 +37,8 @@ import net.minecraft.world.level.chunk.ChunkGeneratorStructureState;
 import net.minecraft.world.level.levelgen.*;
 import net.minecraft.world.level.levelgen.blending.Blender;
 import net.minecraft.world.level.levelgen.placement.PlacedFeature;
+import net.minecraft.world.level.levelgen.structure.Structure;
+import net.minecraft.world.level.levelgen.structure.StructureSet;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
 import etcodehome.freeterraforged.world.worldgen.FTFRandomState;
 
@@ -363,8 +368,15 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 
 		Cell cell = SCRATCH_CELL.get();
 
-		// load = true -> triggers computeAccurate() -> TileCache.acquire() -> WorldFilters/Erosion
-		ctx.lookup.applyCell(cell, x, z, true, false);
+		try {
+			// Attempt standard accurate sampling. If a cache closure race condition
+			// occurs anywhere in this call stack, catch it cleanly instead of crashing.
+			ctx.lookup.applyCell(cell, x, z, true, false);
+		} catch (IllegalStateException e) {
+			// Gracefully fallback to safe/approximate sampling if the underlying
+			// cache closed during a background transition or teleport race.
+			ctx.lookup.applyCell(cell, x, z, false, true);
+		}
 
 		// Convert normalized height (0.0F - 1.0F) to world Y block coordinate
 		return ctx.levels.scale(cell.height);
@@ -533,10 +545,12 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 			StructureTemplateManager templates
 	) {
 		WorldgenPlans.Structures plan = this.requireStage(WorldgenFacet.STRUCTURES).structures();
-		Set<net.minecraft.resources.ResourceKey<net.minecraft.world.level.levelgen.structure.StructureSet>> allowed =
+		Set<ResourceKey<StructureSet>> plannedSets =
 				plan.sets().stream().map(Holder.Reference::key).collect(Collectors.toUnmodifiableSet());
+		Supplier<Set<ResourceKey<Structure>>> plannedStructures = Suppliers.memoize(() ->
+				plan.structures().stream().map(Holder.Reference::key).collect(Collectors.toUnmodifiableSet()));
 		structureState.possibleStructureSets().forEach(holder -> {
-			if (holder.unwrapKey().map(allowed::contains).orElse(false)) {
+			if (isPlanned(holder, plannedSets, plannedStructures)) {
 				return;
 			}
 			throw new IllegalStateException("Structure state selected a set outside the compiled plan: " + holder);
@@ -552,6 +566,25 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 				this.activeStructures.set(previous);
 			}
 		}
+	}
+
+	/**
+	 * Registered structure sets must come from the compiled plan. Some mods (Create: Structures Arise, for one) rebuild
+	 * registered sets with their own placement and hand them over as direct holders without a registry key, so such a
+	 * set is accepted when every structure it can place belongs to the plan.
+	 */
+	private static boolean isPlanned(
+			Holder<StructureSet> holder,
+			Set<ResourceKey<StructureSet>> plannedSets,
+			Supplier<Set<ResourceKey<Structure>>> plannedStructures
+	) {
+		Optional<ResourceKey<StructureSet>> key = holder.unwrapKey();
+		if (key.isPresent()) {
+			return plannedSets.contains(key.get());
+		}
+		List<StructureSet.StructureSelectionEntry> entries = holder.value().structures();
+		return !entries.isEmpty() && entries.stream().allMatch(entry ->
+				entry.structure().unwrapKey().map(structure -> plannedStructures.get().contains(structure)).orElse(false));
 	}
 
 	public WorldgenPlans.Structures activeStructurePlan() {
@@ -648,8 +681,6 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 					() -> new IllegalStateException("Selected biome has no registry identity")
 			));
 		}
-		// freeze_top_layer is gated by a BiomeFilter evaluated at the chunk's min corner, so
-		// every possible biome must carry it or whole chunks lose snow.
 		Holder<PlacedFeature> freezeTopLayer = findFeature(plan, biomes);
 		for (net.minecraft.resources.ResourceKey<Biome> biome : biomes) {
 			BiomeGenerationSettings.PlainBuilder builder = new BiomeGenerationSettings.PlainBuilder();
