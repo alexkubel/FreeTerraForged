@@ -13,6 +13,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.WorldGenLevel;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
@@ -51,6 +52,7 @@ public class ScreeFeature extends Feature<Config> {
     private static final float WARP_SCALE = 0.04F;
     private static final float WARP_STRENGTH = 22.0F;
 
+
     // Internal Mixture Matrices
     private static final WeightedBlockSelector SCREE_MATERIALS = new WeightedBlockSelector(List.of(
             new WeightedBlockEntry(Blocks.GRAVEL.defaultBlockState(), 1),
@@ -58,6 +60,7 @@ public class ScreeFeature extends Feature<Config> {
             new WeightedBlockEntry(Blocks.ANDESITE.defaultBlockState(), 2),
             new WeightedBlockEntry(Blocks.TUFF.defaultBlockState(), 2),
             new WeightedBlockEntry(Blocks.MOSS_BLOCK.defaultBlockState(), 1)
+//          , new WeightedBlockEntry((ModBlock.FLINTSTONE.get()).defaultBlockState(), 2)
     ));
 
     private static final WeightedBlockSelector DIRT_MATERIALS = new WeightedBlockSelector(List.of(
