@@ -58,6 +58,8 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 			);
 
 	private final BiomeSource selectedBiomeSource;
+	private final UnifiedBiomeSource unifiedBiomeSource;
+	private volatile BiomeSource lastCompiledBiomeSource;
 	private final Optional<BiomeSource> dimensionBiomeSource;
 	private final BiomeSource acquisitionBiomeSource;
 	private final Optional<BiomeSourcePlanInput> acquisitionBiomePlanInput;
@@ -123,7 +125,21 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 					"A direct custom-source plan and a candidate-table root are mutually exclusive"
 			);
 		}
+		this.unifiedBiomeSource = Objects.requireNonNull(unifiedBiomeSource, "unifiedBiomeSource");
+		this.lastCompiledBiomeSource = unifiedBiomeSource;
 		unifiedBiomeSource.bind(this);
+	}
+
+	public boolean isUnifiedBiomeSource(net.minecraft.world.level.biome.BiomeResolver resolver) {
+		return resolver == this.unifiedBiomeSource;
+	}
+
+	Set<Holder<Biome>> externalPossibleBiomes() {
+		BiomeSource currentSource = this.getBiomeSource();
+		if (currentSource == null || currentSource == this.unifiedBiomeSource) {
+			return Set.of();
+		}
+		return currentSource.possibleBiomes();
 	}
 
 	public BiomeSource acquisitionBiomeSource() {
@@ -247,7 +263,7 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 		try {
 			randomState.initialize(epoch);
 			prepared = WorldgenRuntimeBinding.create(
-					epoch, compiled, composeGenerationSettings(compiled)
+					epoch, compiled, composeGenerationSettings(compiled), createFallbackSemantics(compiled, randomState)
 			);
 			randomState.bindPlan(prepared);
 			logOrePlan(compiled);
@@ -268,6 +284,7 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 			}
 			throw failure;
 		}
+		this.lastCompiledBiomeSource = this.getBiomeSource();
 		this.providerCatalog = providers;
 		this.randomState = randomState;
 		this.runtime = prepared;
@@ -293,6 +310,7 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 			long replacementResourceRevision,
 			String replacementResourceLayerFingerprint,
 			TagEpoch replacementTags,
+			BiomeReplacementConfigSnapshot replacementBiomeConfig,
 			WorldgenContributionRevision.Snapshot replacementContributions,
 			FTFRandomState randomState
 	) throws Exception {
@@ -300,7 +318,7 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 		WorldgenRuntimeBinding.State current = binding.current();
 		WorldgenEpoch refreshedEpoch = current.epoch().withInputs(
 				replacementResourceRevision, replacementResourceLayerFingerprint,
-				replacementTags, replacementContributions
+				replacementTags, replacementBiomeConfig, replacementContributions
 		);
 		try {
 			WorldgenProviderCatalog providers = Objects.requireNonNull(
@@ -309,7 +327,8 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 			WorldgenPlan refreshedPlan = MinecraftWorldgenPlanCompiler.compile(refreshedEpoch, providers);
 			WorldgenBiomeSelection.requireExecutablePlan(refreshedPlan);
 			randomState.preparePlanRebind(refreshedEpoch, refreshedPlan);
-			binding.replace(current, refreshedEpoch, refreshedPlan, composeGenerationSettings(refreshedPlan));
+			binding.replace(current, refreshedEpoch, refreshedPlan, composeGenerationSettings(refreshedPlan), createFallbackSemantics(refreshedPlan, randomState));
+			this.lastCompiledBiomeSource = this.getBiomeSource();
 			logOrePlan(refreshedPlan);
 			return refreshedPlan;
 		} catch (Exception | Error failure) {
@@ -329,6 +348,7 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 			long resourceRevision,
 			String resourceLayerFingerprint,
 			TagEpoch tags,
+			BiomeReplacementConfigSnapshot biomeConfig,
 			WorldgenContributionRevision.Snapshot attempted,
 			Throwable failure
 	) {
@@ -337,7 +357,8 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 		);
 		WorldgenEpoch current = binding.epoch();
 		binding.reject(
-				current.id(), resourceRevision, resourceLayerFingerprint, tags, attempted, failure
+				current.id(), resourceRevision, resourceLayerFingerprint, tags, biomeConfig,
+				attempted, failure
 		);
 	}
 
@@ -442,7 +463,7 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 		if (current == null) {
 			return super.getBiomeGenerationSettings(biome);
 		}
-		return current.current().biomeDecorationPlan().generationSettings(biome);
+		return this.ensureExternalBiomes(current, current.current()).biomeDecorationPlan().generationSettings(biome);
 	}
 
 	BiomeGenerationSettings realizedBiomeGenerationSettings(Holder<Biome> biome) {
@@ -692,13 +713,63 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 					"FTF generator stage " + facet + " is unavailable [" + cause.code() + "]: " + cause.message()
 			);
 		}
-		return runtime;
+		return this.ensureExternalBiomes(binding, runtime);
+	}
+
+	private WorldgenRuntimeBinding.State ensureExternalBiomes(
+			WorldgenRuntimeBinding binding,
+			WorldgenRuntimeBinding.State current
+	) {
+		BiomeSource currentSource = this.getBiomeSource();
+		if (currentSource == null || currentSource == this.lastCompiledBiomeSource) {
+			return current;
+		}
+		synchronized (this) {
+			WorldgenRuntimeBinding.State latest = binding.current();
+			BiomeSource latestSource = this.getBiomeSource();
+			if (latestSource == null || latestSource == this.lastCompiledBiomeSource || this.providerCatalog == null || this.randomState == null) {
+				return latest;
+			}
+			this.lastCompiledBiomeSource = latestSource;
+			if (latest.possibleBiomes().containsAll(latestSource.possibleBiomes())) {
+				return latest;
+			}
+			WorldgenPlan recompiled = MinecraftWorldgenPlanCompiler.compile(latest.epoch(), this.providerCatalog);
+			binding.replace(
+					latest,
+					latest.epoch(),
+					recompiled,
+					composeGenerationSettings(recompiled),
+					createFallbackSemantics(recompiled, this.randomState)
+			);
+			return binding.current();
+		}
+	}
+
+	@org.jetbrains.annotations.Nullable
+	private static etcodehome.freeterraforged.world.worldgen.biome.ClimateQuerySemantics createFallbackSemantics(
+			WorldgenPlan plan,
+			FTFRandomState randomState
+	) {
+		var preset = randomState.preset();
+		var context = randomState.generatorContext();
+		if (preset == null || context == null) {
+			return null;
+		}
+		return new etcodehome.freeterraforged.world.worldgen.biome.ClimateQuerySemantics(
+				plan.samplerDecoration().queryPolicy(),
+				preset,
+				plan.owner().seed(),
+				context,
+				new Object()
+		);
 	}
 
 	private WorldgenPlan requireBiomeSelection() {
 		WorldgenPlan current = this.requireStage(WorldgenFacet.PROVIDER_SELECTION);
 		this.requireStage(WorldgenFacet.SELECTION_DECORATION);
 		this.requireStage(WorldgenFacet.SPATIAL_OWNERSHIP);
+		this.requireStage(WorldgenFacet.BIOME_REPLACEMENT);
 		return current;
 	}
 
@@ -718,6 +789,9 @@ public final class TerraForgedChunkGenerator extends NoiseBasedChunkGenerator
 		this.randomState = null;
 		this.providerCatalog = null;
 		this.preServerFailures.set(Map.of());
+		this.activeBiomeDecoration.remove();
+		this.activeStructures.remove();
+		etcodehome.freeterraforged.world.worldgen.biome.UndergroundBiomeBanding.clearThreadCaches();
 		Throwable failure = null;
 		try {
 			if (closingRandomState != null) {
