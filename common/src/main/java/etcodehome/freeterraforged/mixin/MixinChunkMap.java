@@ -29,6 +29,7 @@ import etcodehome.freeterraforged.FTFCommon;
 import etcodehome.freeterraforged.world.worldgen.FTFRandomState;
 import etcodehome.freeterraforged.world.worldgen.FlowSettingsSnapshot;
 import etcodehome.freeterraforged.world.worldgen.IFlowSettingsHolder;
+import etcodehome.freeterraforged.world.worldgen.runtime.BiomeReplacementConfigStore;
 import etcodehome.freeterraforged.world.worldgen.runtime.TagEpoch;
 import etcodehome.freeterraforged.world.worldgen.runtime.TerraForgedChunkGenerator;
 import etcodehome.freeterraforged.world.worldgen.runtime.WorldgenEpoch;
@@ -43,7 +44,10 @@ public class MixinChunkMap {
 	private RandomState randomState;
 
 	@Inject(
-		at = @At("TAIL"),
+		at = @At(
+			value = "INVOKE",
+			target = "Lnet/minecraft/world/level/chunk/ChunkGenerator;createState(Lnet/minecraft/core/HolderLookup;Lnet/minecraft/world/level/levelgen/RandomState;J)Lnet/minecraft/world/level/chunk/ChunkGeneratorStructureState;"
+		),
 		method = "<init>"
 	)
 	public void ChunkMap(ServerLevel serverLevel, LevelStorageSource.LevelStorageAccess storageAccess, DataFixer dataFixer, StructureTemplateManager templateLoader, Executor executor, BlockableEventLoop<Runnable> eventLoop, LightChunkGetter lightChunkGetter, ChunkGenerator chunkGenerator, ChunkProgressListener chunkProgressListener, ChunkStatusUpdateListener chunkStatusListener, Supplier<DimensionDataStorage> dimensionStorage, int viewDistance, boolean syncChunkWrites, CallbackInfo callback) {
@@ -55,14 +59,8 @@ public class MixinChunkMap {
 			throw new IllegalStateException("RandomState does not expose the FTF ownership contract");
 		}
 		if (!(chunkGenerator instanceof TerraForgedChunkGenerator terraForged)) {
-			String settingsIdentity = WorldgenSettingsIdentity.describe(chunkGenerator);
-			if (rtfRandomState.isTerraForged()) {
-				throw new IllegalStateException(
-					"FTF density functions require the registered TerraForged generator root; resolved generator is "
-						+ settingsIdentity
-				);
-			}
 			if (serverLevel.dimension() == Level.OVERWORLD) {
+				String settingsIdentity = WorldgenSettingsIdentity.describe(chunkGenerator);
 				FTFCommon.LOGGER.warn(
 					"FTF terrain generation is inactive for the Overworld: resolved generator is {}. "
 						+ "The world will use that generator; select the FreeTerraForged world type to use FTF terrain.",
@@ -91,6 +89,7 @@ public class MixinChunkMap {
 				resourceRevision
 			),
 			new TagEpoch(0L, WorldgenFingerprints.tags(serverLevel.registryAccess())),
+			BiomeReplacementConfigStore.capture(),
 			WorldgenContributionRevision.snapshot(dimension, providerCatalog)
 		);
 		try {
