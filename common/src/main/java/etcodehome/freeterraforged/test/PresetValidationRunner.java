@@ -16,10 +16,17 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mojang.datafixers.util.Pair;
 import com.mojang.serialization.JsonOps;
 import org.apache.commons.io.file.PathUtils;
+
+import etcodehome.freeterraforged.data.worldgen.preset.settings.MiscellaneousSettings;
+import etcodehome.freeterraforged.tags.FTFBlockTags;
+import etcodehome.freeterraforged.world.worldgen.feature.DecorateSnowFeature;
+import etcodehome.freeterraforged.world.worldgen.feature.ScreeFeature;
+import net.minecraft.world.level.block.Blocks;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -65,12 +72,20 @@ import etcodehome.freeterraforged.data.worldgen.preset.PresetManager;
 import etcodehome.freeterraforged.data.worldgen.preset.FTFWorldPresetDataPacks;
 import etcodehome.freeterraforged.data.worldgen.preset.FTFWorldPresets;
 import etcodehome.freeterraforged.data.worldgen.preset.settings.ContinentType;
+import etcodehome.freeterraforged.data.worldgen.preset.settings.MiscellaneousSettings;
+import etcodehome.freeterraforged.tags.FTFBlockTags;
+import etcodehome.freeterraforged.world.worldgen.feature.DecorateSnowFeature;
+import etcodehome.freeterraforged.world.worldgen.feature.ScreeFeature;
+import net.minecraft.world.level.block.Blocks;
 import etcodehome.freeterraforged.data.worldgen.preset.settings.Preset;
 import etcodehome.freeterraforged.data.worldgen.preset.settings.Presets;
+import etcodehome.freeterraforged.data.worldgen.preset.settings.WorldSettings;
 import etcodehome.freeterraforged.platform.ConfigUtil;
 import etcodehome.freeterraforged.registries.FTFRegistries;
 import etcodehome.freeterraforged.world.worldgen.biome.BiomeCandidateRoles;
+import etcodehome.freeterraforged.world.worldgen.biome.Continentalness;
 import etcodehome.freeterraforged.world.worldgen.biome.UndergroundBiomeBanding;
+import etcodehome.freeterraforged.world.worldgen.densityfunction.CellSampler;
 import etcodehome.freeterraforged.world.worldgen.perf.WorldgenBenchmarkRunner;
 import etcodehome.freeterraforged.world.worldgen.runtime.BiomePlacementPlan;
 import etcodehome.freeterraforged.world.worldgen.search.BiomeSearchResolution;
@@ -244,6 +259,59 @@ public final class PresetValidationRunner {
 
 	public record TestRecord(String name, String notes, boolean passed, String error) {}
 
+	private static void verifySnowCoverCompatibility() {
+		// Presets enable snowCoversSmallPlants by default.
+		MiscellaneousSettings defaults = MiscellaneousSettings.makeDefault();
+		if (!defaults.snowCoversSmallPlants) {
+			throw new AssertionError("Default miscellaneous settings must enable snow cover");
+		}
+		defaults.snowCoversSmallPlants = false;
+		JsonObject miscJson = MiscellaneousSettings.CODEC.encodeStart(JsonOps.INSTANCE, defaults)
+			.getOrThrow(msg -> new IllegalStateException("Failed to encode miscellaneous settings: " + msg))
+			.getAsJsonObject();
+		MiscellaneousSettings roundTrip = MiscellaneousSettings.CODEC.parse(JsonOps.INSTANCE, miscJson)
+			.getOrThrow(msg -> new IllegalStateException("Failed to decode miscellaneous settings: " + msg));
+		if (roundTrip.snowCoversSmallPlants) {
+			throw new AssertionError("snowCoversSmallPlants=false did not survive a codec round trip");
+		}
+		if (defaults.copy().snowCoversSmallPlants) {
+			throw new AssertionError("MiscellaneousSettings.copy() dropped snowCoversSmallPlants=false");
+		}
+		miscJson.remove("snowCoversSmallPlants");
+		MiscellaneousSettings legacy = MiscellaneousSettings.CODEC.parse(JsonOps.INSTANCE, miscJson)
+			.getOrThrow(msg -> new IllegalStateException("Legacy miscellaneous settings failed to decode: " + msg));
+		if (!legacy.snowCoversSmallPlants) {
+			throw new AssertionError("Legacy miscellaneous settings without snowCoversSmallPlants failed to decode as default enabled");
+		}
+
+		// Generated preset packs in existing worlds store decorate_snow configs.
+		DecorateSnowFeature.Config config = new DecorateSnowFeature.Config(true, true, new ScreeFeature.Config(0, 0, 0, 0, 0F, 0F, 0F, 0F, 0F), false);
+		JsonObject configJson = DecorateSnowFeature.Config.CODEC.encodeStart(JsonOps.INSTANCE, config)
+			.getOrThrow(msg -> new IllegalStateException("Failed to encode decorate_snow config: " + msg))
+			.getAsJsonObject();
+		if (DecorateSnowFeature.Config.CODEC.parse(JsonOps.INSTANCE, configJson)
+			.getOrThrow(msg -> new IllegalStateException("Failed to decode decorate_snow config: " + msg)).coverPlants()) {
+			throw new AssertionError("cover_plants=false did not survive a codec round trip");
+		}
+		configJson.remove("cover_plants");
+		if (!DecorateSnowFeature.Config.CODEC.parse(JsonOps.INSTANCE, configJson)
+			.getOrThrow(msg -> new IllegalStateException("Legacy decorate_snow config failed to decode: " + msg)).coverPlants()) {
+			throw new AssertionError("Legacy decorate_snow config without cover_plants failed to decode as default enabled");
+		}
+
+		// The bundled tag must resolve to small ground plants only.
+		if (!Blocks.POPPY.defaultBlockState().is(FTFBlockTags.SNOW_COVERABLE)
+			|| !Blocks.SHORT_GRASS.defaultBlockState().is(FTFBlockTags.SNOW_COVERABLE)
+			|| !Blocks.PINK_PETALS.defaultBlockState().is(FTFBlockTags.SNOW_COVERABLE)) {
+			throw new AssertionError("snow_coverable is missing expected small plants");
+		}
+		if (Blocks.TALL_GRASS.defaultBlockState().is(FTFBlockTags.SNOW_COVERABLE)
+			|| Blocks.SNOW.defaultBlockState().is(FTFBlockTags.SNOW_COVERABLE)
+			|| Blocks.OAK_SAPLING.defaultBlockState().is(FTFBlockTags.SNOW_COVERABLE)) {
+			throw new AssertionError("snow_coverable contains blocks that must never be covered");
+		}
+	}
+
 	private static String validateAdaptiveBiomeSearchResolution() {
 		String topology = LocateSearchValidator.validateTopology();
 		Preset terrainPreset = Presets.makeFTFDefault().copy();
@@ -388,6 +456,142 @@ public final class PresetValidationRunner {
 			+ "; quart-aligned biome/terrain scale derivation, semantic filler roles, preset-scaled unknowns, and depth stages";
 	}
 
+	private static String validateContinentalnessAndControlPoints(GeneratorContext genCtx) {
+		etcodehome.freeterraforged.world.worldgen.cell.heightmap.Heightmap heightmap = genCtx.getHeightmap();
+		etcodehome.freeterraforged.world.worldgen.cell.heightmap.Levels levels = heightmap.levels();
+		WorldSettings.ControlPoints cp = heightmap.controlPoints();
+
+		Cell cell = new Cell();
+
+		// 1. Fix 2: Mushroom Island built terrain strictly C1 or C0 ranged [-1.20F, -1.05F]
+		cell.terrain = TerrainType.MUSHROOM_FIELDS;
+		cell.height = levels.water + 0.1F;
+		cell.controlPoint = cp.islandCoast;
+		float cIslandCoast = CellSampler.Field.CONTINENT.read(cell, heightmap);
+		if (Math.abs(cIslandCoast - (-1.05F)) > 1e-3F) {
+			throw new AssertionError("Mushroom island shoreline at islandCoast must meet -1.05F (C1), was " + cIslandCoast);
+		}
+		cell.controlPoint = cp.islandInland;
+		float cIslandInland = CellSampler.Field.CONTINENT.read(cell, heightmap);
+		if (Math.abs(cIslandInland - (-1.20F)) > 1e-3F) {
+			throw new AssertionError("Mushroom island peak at islandInland must meet -1.20F (C0), was " + cIslandInland);
+		}
+
+		// Standard island (non-mushroom) must evaluate to C4 coast (-0.185F)
+		cell.terrain = TerrainType.ISLAND;
+		cell.controlPoint = cp.islandCoast;
+		float cStandardIsland = CellSampler.Field.CONTINENT.read(cell, heightmap);
+		if (Math.abs(cStandardIsland - (-0.185F)) > 1e-3F) {
+			throw new AssertionError("Standard island shoreline must meet -0.185F (C4), was " + cStandardIsland);
+		}
+
+		// 2. Fix 3: All areas below ocean water level strictly C2 or C3 ranged based on height
+		float floorHeight = levels.water(-levels.oceanDepth);
+		float shallowBlocks = Math.min(22.0F, levels.oceanDepth * 0.40F);
+		float hSplit = 1.0F - (shallowBlocks / levels.oceanDepth);
+		float splitHeight = floorHeight + hSplit * (levels.water - floorHeight);
+
+		cell.terrain = TerrainType.NONE;
+		// Ocean floor (C2 deep ocean)
+		cell.height = floorHeight;
+		float cOceanFloor = CellSampler.Field.CONTINENT.read(cell, heightmap);
+		if (Math.abs(cOceanFloor - (-1.045F)) > 1e-3F) {
+			throw new AssertionError("Ocean floor at max depth must meet -1.045F (C2), was " + cOceanFloor);
+		}
+
+		// Split point (C2 -> C3 boundary)
+		cell.height = splitHeight;
+		float cOceanSplit = CellSampler.Field.CONTINENT.read(cell, heightmap);
+		if (Math.abs(cOceanSplit - (-0.455F)) > 1e-3F) {
+			throw new AssertionError("Ocean depth split boundary must meet -0.455F, was " + cOceanSplit);
+		}
+
+		// Waterline just below surface (C3 shallow ocean)
+		cell.height = levels.water;
+		float cSubmergedWaterline = CellSampler.Field.CONTINENT.read(cell, heightmap);
+		if (Math.abs(cSubmergedWaterline - (-0.191F)) > 1e-3F) {
+			throw new AssertionError("Submerged waterline must meet -0.191F (C3), was " + cSubmergedWaterline);
+		}
+		if (cSubmergedWaterline >= -0.19F) {
+			throw new AssertionError("Submerged waterline must be strictly < -0.19F to prevent beach misbioming, was " + cSubmergedWaterline);
+		}
+
+		// 3. Fix 1: Continent built terrain above water level starts at C4 (-0.185F) and transitions to C5 / C6 / C7
+		cell.height = levels.water + 0.1F;
+		cell.controlPoint = cp.beach;
+		float cOnshoreBeach = CellSampler.Field.CONTINENT.read(cell, heightmap);
+		if (Math.abs(cOnshoreBeach - (-0.185F)) > 1e-3F) {
+			throw new AssertionError("Onshore beach boundary must meet -0.185F (C4), was " + cOnshoreBeach);
+		}
+
+		// Below beach, continent terrain above water must never drop below C4 (-0.19F)
+		cell.controlPoint = cp.beach - 0.05F;
+		float cBelowBeach = CellSampler.Field.CONTINENT.read(cell, heightmap);
+		if (cBelowBeach < -0.19F - 1e-4F) {
+			throw new AssertionError("Continent above water must never have continentalness < C4 (-0.19F), was " + cBelowBeach);
+		}
+
+		cell.controlPoint = cp.coast;
+		float cCoast = CellSampler.Field.CONTINENT.read(cell, heightmap);
+		if (Math.abs(cCoast - (-0.11F)) > 1e-3F) {
+			throw new AssertionError("Coast boundary must meet -0.11F (C5), was " + cCoast);
+		}
+
+		cell.controlPoint = cp.inland;
+		float cInland = CellSampler.Field.CONTINENT.read(cell, heightmap);
+		if (Math.abs(cInland - 0.03F) > 1e-3F) {
+			throw new AssertionError("Inland boundary must meet 0.03F (C6), was " + cInland);
+		}
+
+		float midSplitEdge = cp.inland + 0.35F * (1.0F - cp.inland);
+		cell.controlPoint = midSplitEdge;
+		float cMidSplit = CellSampler.Field.CONTINENT.read(cell, heightmap);
+		if (Math.abs(cMidSplit - 0.30F) > 1e-3F) {
+			throw new AssertionError("Mid-interior split boundary must meet 0.30F (C7), was " + cMidSplit);
+		}
+
+		cell.controlPoint = 1.0F;
+		float cPeak = CellSampler.Field.CONTINENT.read(cell, heightmap);
+		if (Math.abs(cPeak - 1.00F) > 1e-3F) {
+			throw new AssertionError("Continental peak must reach 1.00F, was " + cPeak);
+		}
+
+		// 4. Mushroom island built terrain strictly in C1 / C0 range [-1.20F, -1.05F], and oceanic islands in C4/C5 range [-0.185F, 0.03F]
+		cell.terrain = TerrainType.MUSHROOM_FIELDS;
+		for (float edge = 0.0F; edge <= cp.islandCoast; edge += 0.01F) {
+			cell.controlPoint = edge;
+			float c = CellSampler.Field.CONTINENT.read(cell, heightmap);
+			if (c < -1.20F - 1e-4F || c > -1.05F + 1e-4F) {
+				throw new AssertionError("Mushroom island terrain at edge " + edge + " had c=" + c + ", outside C1/C0 range [-1.20, -1.05]");
+			}
+		}
+
+		cell.terrain = TerrainType.ISLAND;
+		for (float edge = 0.0F; edge <= cp.islandCoast; edge += 0.01F) {
+			cell.controlPoint = edge;
+			float c = CellSampler.Field.CONTINENT.read(cell, heightmap);
+			if (c < -0.185F - 1e-4F || c > Continentalness.NEAR_INLAND.max() + 1e-5F) {
+				throw new AssertionError("Oceanic island exceeded C4/C5 range [-0.185, 0.03] at edge " + edge + ": " + c);
+			}
+		}
+
+		// 4. Slider Proportionality Verification
+		WorldSettings.ControlPoints narrowInland = new WorldSettings.ControlPoints(0.0F, 0.074F, 0.102F, 0.13144F, 0.2210F, 0.3576F, 0.40F);
+		WorldSettings.ControlPoints wideInland = new WorldSettings.ControlPoints(0.0F, 0.074F, 0.102F, 0.13144F, 0.2210F, 0.3576F, 0.70F);
+		etcodehome.freeterraforged.world.worldgen.cell.heightmap.Heightmap hmNarrow = new etcodehome.freeterraforged.world.worldgen.cell.heightmap.Heightmap(null, null, null, null, levels, narrowInland, 1.0F, null, null);
+		etcodehome.freeterraforged.world.worldgen.cell.heightmap.Heightmap hmWide = new etcodehome.freeterraforged.world.worldgen.cell.heightmap.Heightmap(null, null, null, null, levels, wideInland, 1.0F, null, null);
+
+		cell.terrain = TerrainType.NONE;
+		cell.controlPoint = 0.55F;
+		float cNarrow = CellSampler.Field.CONTINENT.read(cell, hmNarrow);
+		float cWide = CellSampler.Field.CONTINENT.read(cell, hmWide);
+		if (cNarrow <= Continentalness.MID_INLAND.min() || cWide >= Continentalness.NEAR_INLAND.max()) {
+			throw new AssertionError("Control point slider adjustment failed to alter terrain band classification at edge 0.55");
+		}
+
+		return "All 7 vanilla continentalness bands continuous (delta < 1e-3), islands strictly bounded <= 0.03F, control point proportionality verified";
+	}
+
 	public static void runAllTests(MinecraftServer server) {
 		String serverModName = server.getServerModName();
 		String loader = serverModName.toLowerCase().replaceAll("[^a-z0-9]", "");
@@ -453,6 +657,27 @@ public final class PresetValidationRunner {
 			);
 			FTFCommon.LOGGER.info("[FTF-Test] PASSED: Live biome locate comparison ({})", locateNotes);
 			testRecords.add(new TestRecord(currentTestName, locateNotes, true, null));
+
+			currentTestName = "presetValidation.allVanillaBiomesCoverage." + loader;
+			watchdog.setStep(currentTestName);
+			VanillaBiomeCoverageValidator.Result coverageResult = VanillaBiomeCoverageValidator.validate(
+				server, loader, watchdog::setStep
+			);
+			watchdog.setStep(currentTestName);
+			String coverageNotes = String.format(
+				java.util.Locale.ROOT,
+				"%d/%d Overworld biomes located (>= %dx%d area) & %d non-Overworld rejected in %dms (max: %s @ %dms)",
+				coverageResult.overworldBiomesVerified(),
+				coverageResult.overworldBiomesVerified(),
+				etcodehome.freeterraforged.world.worldgen.search.FTFBiomeLocateQuery.MIN_BIOME_AREA_BLOCKS,
+				etcodehome.freeterraforged.world.worldgen.search.FTFBiomeLocateQuery.MIN_BIOME_AREA_BLOCKS,
+				coverageResult.nonOverworldBiomesRejected(),
+				coverageResult.totalMillis(),
+				coverageResult.slowestBiome(),
+				coverageResult.maxBiomeMillis()
+			);
+			FTFCommon.LOGGER.info("[FTF-Test] PASSED: Complete vanilla biome coverage validation ({})", coverageNotes);
+			testRecords.add(new TestRecord(currentTestName, coverageNotes, true, null));
 
 			currentTestName = "presetValidation.terrainLocateLivePlan." + loader;
 			watchdog.setStep(currentTestName);
@@ -907,6 +1132,16 @@ public final class PresetValidationRunner {
 			testRecords.add(new TestRecord(currentTestName, String.format("Radius: %d blocks | 100%% bit-for-bit core parity verified", testRadius), true, null));
 
 			// -----------------------------------------------------------------------------------------
+			// Continentalness Distribution, Range Mapping & Control Point Proportionality
+			// -----------------------------------------------------------------------------------------
+			currentTestName = "presetValidation.continentalnessDistributionAndControlPoints." + loader;
+			watchdog.setStep(currentTestName);
+			FTFCommon.LOGGER.info("[FTF-Test] Verifying Continentalness Distribution, Range Mapping & Control Point Proportionality...");
+			String continentalnessNotes = validateContinentalnessAndControlPoints(genCtx);
+			FTFCommon.LOGGER.info("[FTF-Test] PASSED: Continentalness distribution & control point proportionality ({})", continentalnessNotes);
+			testRecords.add(new TestRecord(currentTestName, continentalnessNotes, true, null));
+
+			// -----------------------------------------------------------------------------------------
 			// Two-Stage Datapack Reload & User Spawn Persistence
 			// -----------------------------------------------------------------------------------------
 			currentTestName = "presetValidation.twoStageReloadSpawnPersistence." + loader;
@@ -1075,7 +1310,7 @@ public final class PresetValidationRunner {
 								worldX, worldZ, previewCell.height, previewY, worldCell.height, worldY
 							));
 						}
-						if (Float.compare(previewCell.continentEdge, worldCell.continentEdge) != 0
+						if (Float.compare(previewCell.controlPoint, worldCell.controlPoint) != 0
 							|| Float.compare(previewCell.riverMask, worldCell.riverMask) != 0) {
 							throw new AssertionError(String.format(
 								"2D Preview vs Reloaded World continent/river mismatch at (%d, %d)", worldX, worldZ
@@ -1347,17 +1582,27 @@ public final class PresetValidationRunner {
 				if (resolvedViaSource == null || resolvedViaCell == null) {
 					throw new AssertionError("Foreign Climate.Sampler failed to resolve biome on TerraForgedChunkGenerator (Issue #298)");
 				}
+
+				var nbtOps = net.minecraft.resources.RegistryOps.create(net.minecraft.nbt.NbtOps.INSTANCE, server.registryAccess());
+				String encodedBiomeSourceKey = net.minecraft.world.level.biome.BiomeSource.CODEC
+					.encodeStart(nbtOps, liveTfGen.getBiomeSource())
+					.result()
+					.map(net.minecraft.nbt.Tag::toString)
+					.orElse(null);
+				if (encodedBiomeSourceKey == null || !encodedBiomeSourceKey.contains("freeterraforged:unified")) {
+					throw new AssertionError("UnifiedBiomeSource failed to serialize via BiomeSource.CODEC for stronghold cache keys (Issue #297): " + encodedBiomeSourceKey);
+				}
 			}
 
 			FTFCommon.LOGGER.info(
-				"[FTF-Test] PASSED: Mod compatibility shims verified (non-FTF dimension fallback continents={}, erosion={}, ridges={}; foreign Climate.Sampler adopted cleanly).",
+				"[FTF-Test] PASSED: Mod compatibility shims verified (non-FTF dimension fallback continents={}, erosion={}, ridges={}; foreign Climate.Sampler adopted cleanly; UnifiedBiomeSource codec verified).",
 				String.format(java.util.Locale.ROOT, "%.4f", fallbackContinent),
 				String.format(java.util.Locale.ROOT, "%.4f", fallbackErosion),
 				String.format(java.util.Locale.ROOT, "%.4f", fallbackRidges)
 			);
 			testRecords.add(new TestRecord(
 				currentTestName,
-				"Non-FTF dimension CellSampler fallback (#340/#310) & foreign Climate.Sampler adoption (#298) verified",
+				"Non-FTF dimension CellSampler fallback (#340/#310), foreign Climate.Sampler adoption (#298) & UnifiedBiomeSource codec (#297) verified",
 				true,
 				null
 			));
@@ -2199,6 +2444,16 @@ public final class PresetValidationRunner {
 				true,
 				null
 			));
+
+			// -----------------------------------------------------------------------------------------
+			// Snow Cover Setting Legacy Compatibility & Bundled Tag Resolution (Issue #284)
+			// -----------------------------------------------------------------------------------------
+			currentTestName = "presetValidation.snowCoverCompatibility." + loader;
+			watchdog.setStep(currentTestName);
+			FTFCommon.LOGGER.info("[FTF-Test] Verifying snow cover setting compatibility & snow_coverable tag...");
+			verifySnowCoverCompatibility();
+			FTFCommon.LOGGER.info("[FTF-Test] PASSED: Default presets and decorate_snow configs enable snow cover; explicit values round-trip; snow_coverable resolves.");
+			testRecords.add(new TestRecord(currentTestName, "Default presets & decorate_snow configs enable snow cover; explicit values round-trip; snow_coverable resolves", true, null));
 
 			// -----------------------------------------------------------------------------------------
 			// Complete Summary Banner

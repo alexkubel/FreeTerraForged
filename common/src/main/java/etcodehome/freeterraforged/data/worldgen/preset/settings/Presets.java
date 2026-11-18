@@ -17,7 +17,9 @@ import etcodehome.freeterraforged.data.worldgen.preset.settings.WorldSettings.Pr
 public class Presets {
 
 	public static Preset makeFTFDefault() {
-		return modernDefaultWithRivers();
+		Preset preset = modernDefaultWithRivers();
+		preset.presentation().setPresetName("FreeTerraForged");
+		return preset;
 	}
 	
 	public static Preset makeLegacyDefault() {
@@ -28,7 +30,7 @@ public class Presets {
 				new Properties(SpawnType.CONTINENT_CENTER, 320, 64, 63, -54, 63, 0, 0)
 			),
 			new SurfaceSettings(new SurfaceSettings.Scree(30, 140, 40, 95, 0.65F, 0.475F, 0.4F)),
-			new CaveSettings(0.0F, 1.5625F, 1.0F, 1.0F, 1.0F, 0.14285715F, 0.07F, 0.02F, true, false),
+			new CaveSettings(0.0F, 0.15F, 1.0F, 1.0F, 1.0F, 0.14285715F, 0.07F, 0.02F, true, false),
 			new ClimateSettings(
 				new RangeValue(NoiseType.SIN, 0, 6, 2, 0.0F, 0.98F, 0.0F, 0.05F),
 				new RangeValue(NoiseType.SIMPLEX, 0, 6, 1, 0.0F, 1.0F, 0.0F, 0.0F),
@@ -61,7 +63,7 @@ public class Presets {
 			FlowSettings.makeDefault(),
 			IslandSettings.makeDefault(),
 			ErosionFilterSettings.makeDefault(),
-			new MiscellaneousSettings(true, 600, true, true, true, false, true, true, true, true, true, 0.4F, 0.4F),
+			new MiscellaneousSettings(true, 600, true, true, true, false, true, true, true, true, true, 0.4F, 0.4F, true),
 			PresentationSettings.makeDefault()
 		);
 	}
@@ -74,7 +76,7 @@ public class Presets {
 				new Properties(SpawnType.WORLD_ORIGIN, 320, 64, 63, -54, 63, 0, 0)
 			), 
 			new SurfaceSettings(new SurfaceSettings.Scree(30, 140, 40, 95, 0.65F, 0.475F, 0.4F)),
-			new CaveSettings(1.0F, 1.5625F, 1.0F, 1.0F, 1.0F, 0.15F, 0.07F, 0.021F, true, false),
+			new CaveSettings(1.0F, 0.15F, 1.0F, 1.0F, 1.0F, 0.15F, 0.07F, 0.021F, true, false),
 			new ClimateSettings(
 				new RangeValue(NoiseType.SIN, 0, 4, 1, 0.0F, 0.98F, 0.05F, 0.0F),
 				new RangeValue(NoiseType.SIMPLEX, 0, 5, 1, 0.0F, 1.0F, 0.0F, 0.0F),
@@ -107,7 +109,7 @@ public class Presets {
 			FlowSettings.makeDefault(),
 			IslandSettings.makeDefault(),
 			ErosionFilterSettings.makeDefault(),
-			new MiscellaneousSettings(false, 600, false, true, false, false, false, false, true, true, true, 1.0F, 0.75F),
+			new MiscellaneousSettings(false, 600, false, true, false, false, false, false, true, true, true, 1.0F, 0.75F, false),
 			PresentationSettings.makeDefault()
 		);
 	}
@@ -120,7 +122,7 @@ public class Presets {
 				new Properties(SpawnType.CONTINENT_CENTER, 320, 64, 63, -54, 63, 0, 0)
 			),
 			new SurfaceSettings(new SurfaceSettings.Scree(30, 140, 40, 95, 0.65F, 0.475F, 0.4F)),
-			new CaveSettings(0.0F, 1.5625F, 1.0F, 1.0F, 1.0F, 0.14285715F, 0.07F, 0.02F, true, false),
+			new CaveSettings(0.0F, 0.15F, 1.0F, 1.0F, 1.0F, 0.14285715F, 0.07F, 0.02F, true, false),
 			new ClimateSettings(
 				new RangeValue(NoiseType.SIN, 0, 7, 1, 0.0F, 1.0F, -0.004F, 0.0F),
 				new RangeValue(NoiseType.SIMPLEX, 0, 6, 1, 0.0F, 1.0F, 0.0F, 0.0F),
@@ -153,7 +155,7 @@ public class Presets {
 			FlowSettings.makeDefault(),
 			IslandSettings.makeDefault(),
 			ErosionFilterSettings.makeDefault(),
-			new MiscellaneousSettings(true, 684, true, true, true, false, true, true, true, true, false, 0.853F, 0.855F),
+			new MiscellaneousSettings(true, 684, true, true, true, false, true, true, true, true, false, 0.853F, 0.855F, true),
 			PresentationSettings.makeDefault()
 		); 
 	}
@@ -166,7 +168,7 @@ public class Presets {
 				new Properties(SpawnType.CONTINENT_CENTER, 320, 64, 63, -54, 63, 0, 0)
 			),
 			new SurfaceSettings(new SurfaceSettings.Scree(30, 140, 40, 95, 0.65F, 0.475F, 0.4F)),
-			new CaveSettings(0.0F, 1.5625F, 1.0F, 1.0F, 1.0F, 0.14285715F, 0.07F, 0.02F, false, false),
+			new CaveSettings(0.0F, 0.15F, 1.0F, 1.0F, 1.0F, 0.14285715F, 0.07F, 0.02F, false, false),
 			new ClimateSettings(
 				new RangeValue(NoiseType.SIN, 0, 4, 1, 0.0F, 0.98F, 0.05F, 0.0F),
 				new RangeValue(NoiseType.SIMPLEX, 0, 5, 1, 0.0F, 1.0F, 0.0F, 0.0F),
@@ -199,7 +201,7 @@ public class Presets {
 			FlowSettings.makeDefault(),
 			IslandSettings.makeDefault(),
 			ErosionFilterSettings.makeDefault(),
-			new MiscellaneousSettings(true, 600, false, true, true, false, true, true, true, true, true, 1.0F, 0.75F),
+			new MiscellaneousSettings(true, 600, false, true, true, false, true, true, true, true, true, 1.0F, 0.75F, true),
 			PresentationSettings.makeDefault()
 		);
 	}
@@ -212,7 +214,7 @@ public class Presets {
 				new Properties(SpawnType.CONTINENT_CENTER, 320, 64, 63, -54, 63, 0, 0)
 			), 
 			new SurfaceSettings(new SurfaceSettings.Scree(30, 140, 40, 95, 0.65F, 0.475F, 0.4F)),
-			new CaveSettings(0.0F, 1.5625F, 1.0F, 1.0F, 1.0F, 0.14285715F, 0.07F, 0.02F, true, false),
+			new CaveSettings(0.0F, 0.15F, 1.0F, 1.0F, 1.0F, 0.14285715F, 0.07F, 0.02F, true, false),
 			new ClimateSettings(
 				new RangeValue(NoiseType.SIN, 0, 4, 2, 0.0F, 1.0F, 0.097F, 0.0F),
 				new RangeValue(NoiseType.SIMPLEX, 0, 3, 1, 0.0F, 1.0F, 0.0F, 0.0F),
@@ -245,7 +247,7 @@ public class Presets {
 			FlowSettings.makeDefault(),
 			IslandSettings.makeDefault(),
 			ErosionFilterSettings.makeDefault(),
-			new MiscellaneousSettings(true, 721, true, true, true, false, true, true, true, true, false, 0.902F, 0.945F),
+			new MiscellaneousSettings(true, 721, true, true, true, false, true, true, true, true, false, 0.902F, 0.945F, true),
 			PresentationSettings.makeDefault()
 		);
 	}
@@ -291,7 +293,7 @@ public class Presets {
 						0.8F)),
 
 				new CaveSettings(0.05578F,
-						1.5625F,
+						0.15F,
 						1.0F,
 						0.4914F,
 						0.4902F,
@@ -483,7 +485,8 @@ public class Presets {
 						false,
 						false,
 						0.85438144F,
-						0.855F),
+						0.855F,
+						true),
 				PresentationSettings.makeDefault()
 		);
 	}

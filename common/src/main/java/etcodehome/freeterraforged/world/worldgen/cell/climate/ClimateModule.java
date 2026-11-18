@@ -3,6 +3,7 @@ package etcodehome.freeterraforged.world.worldgen.cell.climate;
 import etcodehome.freeterraforged.data.worldgen.preset.PresetManager;
 import etcodehome.freeterraforged.world.worldgen.cell.continent.Continent;
 import etcodehome.freeterraforged.world.worldgen.cell.heightmap.Levels;
+import etcodehome.freeterraforged.world.worldgen.cell.terrain.TerrainCategory;
 import etcodehome.freeterraforged.world.worldgen.cell.terrain.TerrainType;
 import etcodehome.freeterraforged.world.worldgen.noise.NoiseUtil;
 import etcodehome.freeterraforged.world.worldgen.noise.NoiseUtil.Vec2f;
@@ -96,7 +97,7 @@ public class ClimateModule {
 		temperature = Noises.warpPerlin(temperature, tempSeed.next(), tempScale, 1, tempScale);
 		this.temperature = temperature;
 		
-		Noise macroBiomeNoise = Noises.worley(seed.next(), climateSettings.biomeShape.macroNoiseSize);
+		Noise macroBiomeNoise = Noises.perlin(seed.next(), climateSettings.biomeShape.macroNoiseSize, 2);
 		this.macroBiomeNoise = macroBiomeNoise;
 
 		Seed erosionSeed = seed.offset(climateSettings.erosion.seedOffset);
@@ -144,7 +145,7 @@ public class ClimateModule {
 		}
 
 		if (sampleClimate) {
-			cell.macroBiomeId = this.macroBiomeNoise.compute(centerX, centerZ, 0);
+			cell.macroBiomeId = this.macroBiomeNoise.compute(x, z, 0);
 
 			float rawMoist = this.moisture.compute(x, z, 0);
 			float moist = this.modifyMoisture(cell.height, rawMoist);
@@ -251,9 +252,9 @@ public class ClimateModule {
 		}
 	}
 
-	private void modifyTerrain(Cell cell, float continentEdge) {
-		if (cell.terrain.isOverground() && !cell.terrain.overridesCoast() && continentEdge <= this.controlPoints.coastMarker()
-			&& cell.terrain != TerrainType.ISLAND && cell.terrain != TerrainType.ISLAND_BEACH && cell.terrain != TerrainType.ISLAND_MOUNTAINS) {
+	private void modifyTerrain(Cell cell, float controlPoint) {
+		if (cell.terrain.isOverground() && !cell.terrain.overridesCoast() && controlPoint <= this.controlPoints.coastMarker()
+			&& cell.terrain.getCategory() != TerrainCategory.ISLAND) {
 			cell.terrain = TerrainType.COAST;
 		}
 	}
